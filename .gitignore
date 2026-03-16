@@ -1,0 +1,35 @@
+# ── Personal config (contains private athlete data) ──────────────────────────
+runtrackz.yml
+.runtrackz.yml
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# ── Virtual environments ──────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+.env
+
+# ── Data files (fit files may contain personal GPS data) ─────────────────────
+*.fit
+*.FIT
+
+# ── Generated outputs ─────────────────────────────────────────────────────────
+*.png
+*.pdf
+*.csv
+
+# ── IDEs & editors ────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
