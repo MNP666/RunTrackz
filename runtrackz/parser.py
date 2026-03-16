@@ -257,6 +257,23 @@ def load(path: Union[str, Path]) -> 'RunData':
     return RunData._from_raw(raw_records, session, path)
 
 
+def load_parquet(path: Union[str, Path]) -> 'RunData':
+    """
+    Load a :class:`RunData` from a Parquet file written by
+    :meth:`RunData.save_parquet`.
+
+    Parameters
+    ----------
+    path : str or Path
+        Path to the ``.parquet`` file.
+
+    Returns
+    -------
+    RunData
+    """
+    return RunData.load_parquet(path)
+
+
 class RunData:
     """
     Container for a single run parsed from a .fit file.
@@ -360,6 +377,86 @@ class RunData:
             df = df.set_index('timestamp').sort_index()
             df['elapsed_s'] = (df.index - df.index[0]).total_seconds()
         return df
+
+    def save_parquet(self, path: Union[str, Path]) -> Path:
+        """
+        Save the run DataFrame and session metadata to a Parquet file.
+
+        The session dict and original source file path are embedded in the
+        Parquet file's schema metadata so the full ``RunData`` can be
+        reconstructed with :func:`load_parquet` without any sidecar files.
+
+        Parameters
+        ----------
+        path : str or Path
+            Destination path (e.g. ``data/processed/my_run.parquet``).
+            Parent directories are created automatically.
+
+        Returns
+        -------
+        Path
+            The resolved path that was written.
+        """
+        import json
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Serialise session: convert datetime/date objects to ISO strings
+        session_out: dict = {}
+        for k, v in self.session.items():
+            if isinstance(v, (datetime.datetime, datetime.date)):
+                session_out[k] = v.isoformat()
+            else:
+                session_out[k] = v
+
+        table = pa.Table.from_pandas(self.df)
+        existing_meta = table.schema.metadata or {}
+        custom_meta = {
+            b'runtrackz_session':     json.dumps(session_out).encode(),
+            b'runtrackz_source_file': str(self.source_file).encode(),
+        }
+        table = table.replace_schema_metadata({**existing_meta, **custom_meta})
+        pq.write_table(table, path)
+        return path
+
+    @classmethod
+    def load_parquet(cls, path: Union[str, Path]) -> 'RunData':
+        """
+        Load a :class:`RunData` from a Parquet file written by
+        :meth:`save_parquet`.
+
+        Parameters
+        ----------
+        path : str or Path
+            Path to the ``.parquet`` file.
+
+        Returns
+        -------
+        RunData
+        """
+        import json
+        import pyarrow.parquet as pq
+
+        path = Path(path)
+        if not path.exists():
+            raise FileNotFoundError(f"Parquet file not found: {path}")
+
+        table = pq.read_table(path)
+        df = table.to_pandas()
+
+        meta = table.schema.metadata or {}
+        session: dict = {}
+        source_file: Path = path  # fallback if metadata is missing
+
+        if b'runtrackz_session' in meta:
+            session = json.loads(meta[b'runtrackz_session'])
+        if b'runtrackz_source_file' in meta:
+            source_file = Path(meta[b'runtrackz_source_file'].decode())
+
+        return cls(df=df, session=session, source_file=source_file)
 
     def __repr__(self) -> str:
         if self.df.empty:

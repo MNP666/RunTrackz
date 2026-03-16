@@ -252,6 +252,7 @@ def hr_zone_bar(
 
 def splits_bar(
     pace_stats: 'PaceStats',  # noqa: F821
+    config: Optional['Config'] = None,  # noqa: F821
     figsize: tuple = (12, 5),
     title: Optional[str] = None,
 ) -> plt.Figure:
@@ -262,6 +263,8 @@ def splits_bar(
     ----------
     pace_stats : PaceStats
         Result from :func:`runtrackz.pace_analysis.analyze`.
+    config : Config, optional
+        When provided, draws a horizontal LT pace reference line.
     figsize : tuple
     title : str, optional
 
@@ -285,6 +288,12 @@ def splits_bar(
     # Reference line for average pace
     ax1.axhline(avg_pace, color='gray', linestyle='--', linewidth=1,
                 label=f"Avg pace ({_format_pace(avg_pace)})")
+
+    # Lactate threshold pace line
+    if config and config.lactate_threshold.pace_min_km:
+        lt_pace = config.lactate_threshold.pace_min_km
+        ax1.axhline(lt_pace, color='#cc6600', linestyle=':', linewidth=1.2,
+                    label=f"LT pace ({_format_pace(lt_pace)})")
 
     ax1.yaxis.set_major_formatter(mticker.FuncFormatter(_format_pace))
     ax1.invert_yaxis()

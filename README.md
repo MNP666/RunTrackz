@@ -16,12 +16,13 @@ A Python library for analysing running data from `.fit` files — no third-party
 pandas
 matplotlib
 pyyaml
+duckdb       # for the run database (optional)
 ```
 
 Install them with:
 
 ```bash
-pip install pandas matplotlib pyyaml
+pip install pandas matplotlib pyyaml duckdb
 ```
 
 ## Project Structure
@@ -34,7 +35,8 @@ RunTrackz/
 │   ├── hr_analysis.py     # HR zones, TRIMP, aerobic decoupling
 │   ├── pace_analysis.py   # Pace, splits, power, elevation
 │   ├── charts.py          # Matplotlib visualisations
-│   └── config.py          # YAML config loader
+│   ├── config.py          # YAML config loader
+│   └── database.py        # DuckDB run store
 ├── example.py             # Runnable demo script
 ├── runtrackz.yml          # Personal config (git-ignored)
 └── README.md
@@ -217,6 +219,63 @@ fig.savefig("chart.png", dpi=150, bbox_inches="tight")
 | `default` | Custom blue → green → yellow → orange → red |
 | `spectral` | Matplotlib Spectral colormap (cool → warm diverging) |
 | `rainbow` | Matplotlib rainbow colormap (violet → red) |
+
+## Database
+
+RunTrackz can store processed runs in a local DuckDB database for longitudinal analysis.
+
+```python
+db = runtrackz.database.open("runs.db")   # creates the file if it doesn't exist
+db.insert_run(run, hr, pace)
+print(db)
+# RunDatabase(path='runs.db', runs=1)
+
+# All runs as a DataFrame
+df = db.all_runs()
+
+# Arbitrary SQL
+df = db.query("SELECT run_date, distance_km, trimp FROM runs ORDER BY run_date")
+df = db.query("SELECT * FROM runs WHERE run_date >= ?", ["2026-01-01"])
+
+# Inspect the live schema
+print(db.describe_schema())
+
+db.close()
+# or use as a context manager:
+with runtrackz.database.open("runs.db") as db:
+    db.insert_run(run, hr, pace)
+```
+
+**Schema** (`runs` table, v1):
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | INTEGER | Auto-incrementing primary key |
+| `fit_file` | TEXT | Basename of the source `.fit` file |
+| `runtrackz_version` | TEXT | Library version that processed the file |
+| `run_date` | DATE | Local date of the run |
+| `processed_at` | TIMESTAMPTZ | When the row was inserted |
+| `distance_km` | DOUBLE | Total distance in km |
+| `duration_s` | DOUBLE | Moving time in seconds |
+| `trimp` | DOUBLE | Training Impulse (Bangsbo method) |
+
+**Extending the schema**
+
+The schema is managed as an ordered list of migrations in `database.py`. To add new columns or tables (e.g. run type, avg HR, interval data), append a new entry to `_MIGRATIONS` — existing databases are upgraded automatically on next `open()`:
+
+```python
+_MIGRATIONS = [
+    ...existing entries...,
+    (
+        2,
+        "Add run_type and avg_hr columns",
+        """
+        ALTER TABLE runs ADD COLUMN run_type TEXT DEFAULT 'run';
+        ALTER TABLE runs ADD COLUMN avg_hr   DOUBLE;
+        """,
+    ),
+]
+```
 
 ## Dashboard Integration
 

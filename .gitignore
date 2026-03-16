@@ -22,10 +22,24 @@ env/
 *.fit
 *.FIT
 
+# ── Database (contains personal training data) ───────────────────────────────
+*.db
+*.duckdb
+
+# ── Data folder contents (raw .fit files, processed parquet, DuckDB) ──────────
+# Keep the folder structure (.gitkeep files are tracked); ignore the data itself
+data/raw/*
+data/processed/*
+data/database/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/database/.gitkeep
+
 # ── Generated outputs ─────────────────────────────────────────────────────────
 *.png
 *.pdf
 *.csv
+*.parquet
 
 # ── IDEs & editors ────────────────────────────────────────────────────────────
 .idea/
