@@ -1,14 +1,18 @@
 # RunTrackz
 
-A Python library for analysing running data from `.fit` files — no third-party FIT parsing library required. Built for Coros and Garmin wearables.
+A Python library for analysing running data from `.fit` files — no third-party FIT parsing library required. Tested with **Coros** and **Garmin** wearables.
 
 ## Features
 
-- **Pure-Python FIT parser** — reads `.fit` files using only the standard library and pandas
-- **Heart rate analysis** — zone breakdown, TRIMP, aerobic decoupling
+- **Pure-Python FIT parser** — reads `.fit` files using only the standard library and pandas; no fitdecode or similar dependency
+- **Activity type validation** — detects sport and sub-sport from the FIT session; `run.is_run` lets you filter non-running files before analysis
+- **Heart rate analysis** — zone breakdown (5 or 6 zones), TRIMP, aerobic decoupling
 - **Pace & splits** — per-km splits, elevation gain/loss, running power
 - **Matplotlib charts** — overview figure, HR zone bar, splits bar, pace over distance
-- **YAML config file** — personal athlete settings (max HR, lactate threshold, zone definitions, colour scheme)
+- **Parquet storage** — saves each parsed run to a dated `.parquet` file in `data/processed/`
+- **DuckDB database** — migration-based schema for longitudinal analysis
+- **Batch processing** — `process_runs.py` processes every `.fit` file in `data/raw/` in one command
+- **YAML config** — personal athlete settings: max HR, resting HR, lactate threshold, zone method, colour scheme
 
 ## Requirements
 
@@ -16,13 +20,12 @@ A Python library for analysing running data from `.fit` files — no third-party
 pandas
 matplotlib
 pyyaml
-duckdb       # for the run database (optional)
+pyarrow    # for parquet storage
+duckdb     # for the run database
 ```
 
-Install them with:
-
 ```bash
-pip install pandas matplotlib pyyaml duckdb
+pip install pandas matplotlib pyyaml pyarrow duckdb
 ```
 
 ## Project Structure
@@ -31,13 +34,18 @@ pip install pandas matplotlib pyyaml duckdb
 RunTrackz/
 ├── runtrackz/
 │   ├── __init__.py        # Public API
-│   ├── parser.py          # .fit binary parser
+│   ├── parser.py          # .fit binary parser + parquet helpers
 │   ├── hr_analysis.py     # HR zones, TRIMP, aerobic decoupling
 │   ├── pace_analysis.py   # Pace, splits, power, elevation
 │   ├── charts.py          # Matplotlib visualisations
 │   ├── config.py          # YAML config loader
-│   └── database.py        # DuckDB run store
-├── example.py             # Runnable demo script
+│   └── database.py        # DuckDB run store with migrations
+├── data/
+│   ├── raw/               # Drop .fit files here (git-ignored)
+│   ├── processed/         # Parquet files written here (git-ignored)
+│   └── database/          # runs.db lives here (git-ignored)
+├── example.py             # Single-file demo script
+├── process_runs.py        # Batch processing script
 ├── runtrackz.yml          # Personal config (git-ignored)
 └── README.md
 ```
@@ -53,7 +61,11 @@ cfg = runtrackz.load_config()
 # Parse a .fit file
 run = runtrackz.load("my_run.fit")
 print(run)
-# RunData(date=2026-03-12, duration=64.5min, distance=12.35km, points=3843)
+# RunData(sport=running, date=2026-03-12, duration=64.5min, distance=12.35km, points=3843)
+
+# Skip non-running activities before analysis
+if not run.is_run:
+    raise ValueError(f"Expected a run, got '{run.sport}'")
 
 # Heart rate analysis
 hr = runtrackz.hr_analysis.analyze(run, config=cfg)
@@ -66,17 +78,51 @@ print(pace.summary())
 # Charts
 fig = runtrackz.charts.overview(run, config=cfg)
 fig.savefig("overview.png", dpi=150)
+
+# Save parsed data as parquet
+path = runtrackz.make_parquet_path(run, "data/processed")
+run.save_parquet(path)     # e.g. data/processed/12032026_run_01.parquet
 ```
 
-Or run the demo script directly:
+Or run the single-file demo:
 
 ```bash
 python example.py path/to/your_run.fit
 ```
 
+## Batch Processing
+
+Drop your `.fit` files into `data/raw/` and run:
+
+```bash
+# Inspect what's there without writing anything
+python process_runs.py --dry-run
+
+# Process all new files
+python process_runs.py
+
+# Re-process everything (overwrites existing parquet files and database rows)
+python process_runs.py --overwrite
+```
+
+The script skips non-running activities automatically and prints a summary at the end:
+
+```
+Found 12 .fit file(s) in data/raw
+[ 1/12] 12032026_run.fit … ok  → 12032026_run_01.parquet
+[ 2/12] 09042025_run.fit … ok  → 09042025_run_01.parquet
+[ 3/12] 08042025_bike.fit … skipped  (sport=cycling)
+...
+==================================================
+Results for 12 file(s):
+  Processed  : 10
+  Not a run  : 2  (cycling, walking, etc.)
+==================================================
+```
+
 ## Configuration
 
-Copy `runtrackz.yml` into your project root (or `~/.runtrackz.yml` for a user-wide config) and edit it to match your physiology. The file is listed in `.gitignore` so personal data is never committed.
+Copy `runtrackz.yml` into your project root (or `~/.runtrackz.yml` for a global config) and edit it to match your physiology. The file is git-ignored so personal data is never committed.
 
 ```yaml
 athlete:
@@ -98,7 +144,7 @@ lactate_threshold:
   heart_rate: 166        # bpm
 
 charts:
-  color_scheme: default  # default | hsv | matplotlib
+  color_scheme: default  # default | spectral | rainbow
 ```
 
 **Zone methods:**
@@ -116,7 +162,7 @@ heart_rate_zones:
   boundaries: [0.50, 0.60, 0.70, 0.80, 0.87, 0.93, 1.00]  # 7 values = 6 zones
 ```
 
-Config is located automatically in this order: explicit path → `./runtrackz.yml` → `~/.runtrackz.yml` → built-in defaults.
+Config is resolved in this order: explicit path → `./runtrackz.yml` → `~/.runtrackz.yml` → built-in defaults.
 
 ## API
 
@@ -128,6 +174,11 @@ run = runtrackz.load("run.fit")
 run.df           # pandas DataFrame indexed by timestamp
 run.session      # dict of FIT session summary fields
 run.source_file  # Path to the original .fit file
+
+# Activity type
+run.sport        # e.g. 'running', 'cycling', 'walking'
+run.sub_sport    # e.g. 'trail', 'treadmill', 'street', 'generic'
+run.is_run       # True when sport == 'running'
 ```
 
 **DataFrame columns:**
@@ -135,7 +186,7 @@ run.source_file  # Path to the original .fit file
 | Column | Unit | Description |
 |---|---|---|
 | `heart_rate` | bpm | Heart rate |
-| `cadence` | rpm | Cadence (foot strikes per minute) |
+| `cadence` | rpm | Cadence (foot strikes per minute, one foot) |
 | `steps_per_min` | spm | Running cadence (cadence × 2) |
 | `speed_ms` | m/s | Speed |
 | `speed_kmh` | km/h | Speed |
@@ -147,6 +198,19 @@ run.source_file  # Path to the original .fit file
 | `vertical_oscillation_cm` | cm | Vertical oscillation |
 | `stance_time_ms` | ms | Ground contact time |
 | `elapsed_s` | s | Elapsed time from start |
+
+### Parquet storage
+
+```python
+# Generate a dated filename, auto-incrementing if multiple runs on same day:
+#   data/processed/12032026_run_01.parquet
+#   data/processed/12032026_run_02.parquet  ← second run that day
+path = runtrackz.make_parquet_path(run, "data/processed")
+saved = run.save_parquet(path)
+
+# Load back later
+run = runtrackz.load_parquet("data/processed/12032026_run_01.parquet")
+```
 
 ### Heart rate analysis
 
@@ -194,19 +258,10 @@ pace.summary()           # formatted text summary
 All chart functions return a `matplotlib.figure.Figure` and accept an optional `config` argument for zone colours and lactate threshold reference lines.
 
 ```python
-# 4-panel overview: HR, pace, elevation, zone pie
-fig = runtrackz.charts.overview(run, config=cfg)
-
-# Per-km split bar chart with HR overlay
-fig = runtrackz.charts.splits_bar(pace, config=cfg)
-
-# Horizontal HR zone bar chart
-fig = runtrackz.charts.hr_zone_bar(hr, config=cfg)
-
-# HR vs time with zone shading
+fig = runtrackz.charts.overview(run, config=cfg)           # 4-panel overview
+fig = runtrackz.charts.splits_bar(pace, config=cfg)        # per-km split bars
+fig = runtrackz.charts.hr_zone_bar(hr, config=cfg)         # HR zone breakdown
 fig = runtrackz.charts.heart_rate_over_time(run, config=cfg)
-
-# Pace vs distance with LT reference line
 fig = runtrackz.charts.pace_over_distance(run, config=cfg)
 
 fig.savefig("chart.png", dpi=150, bbox_inches="tight")
@@ -216,34 +271,27 @@ fig.savefig("chart.png", dpi=150, bbox_inches="tight")
 
 | Scheme | Description |
 |---|---|
-| `default` | Custom blue → green → yellow → orange → red |
+| `default` | Custom blue → green → yellow → orange → red palette |
 | `spectral` | Matplotlib Spectral colormap (cool → warm diverging) |
 | `rainbow` | Matplotlib rainbow colormap (violet → red) |
 
 ## Database
 
-RunTrackz can store processed runs in a local DuckDB database for longitudinal analysis.
+RunTrackz stores processed runs in a local DuckDB file for longitudinal analysis.
 
 ```python
-db = runtrackz.database.open("runs.db")   # creates the file if it doesn't exist
-db.insert_run(run, hr, pace)
-print(db)
-# RunDatabase(path='runs.db', runs=1)
+with runtrackz.database.open("data/database/runs.db") as db:
+    db.insert_run(run, hr, pace, parquet_file=saved)
 
-# All runs as a DataFrame
-df = db.all_runs()
+    # All runs as a DataFrame
+    print(db.all_runs())
 
-# Arbitrary SQL
-df = db.query("SELECT run_date, distance_km, trimp FROM runs ORDER BY run_date")
-df = db.query("SELECT * FROM runs WHERE run_date >= ?", ["2026-01-01"])
+    # Arbitrary SQL
+    df = db.query("SELECT run_date, distance_km, trimp FROM runs ORDER BY run_date")
+    df = db.query("SELECT * FROM runs WHERE run_date >= ?", ["2026-01-01"])
 
-# Inspect the live schema
-print(db.describe_schema())
-
-db.close()
-# or use as a context manager:
-with runtrackz.database.open("runs.db") as db:
-    db.insert_run(run, hr, pace)
+    # Inspect the live schema and migration history
+    print(db.describe_schema())
 ```
 
 **Schema** (`runs` table, v1):
@@ -258,10 +306,11 @@ with runtrackz.database.open("runs.db") as db:
 | `distance_km` | DOUBLE | Total distance in km |
 | `duration_s` | DOUBLE | Moving time in seconds |
 | `trimp` | DOUBLE | Training Impulse (Bangsbo method) |
+| `parquet_file` | TEXT | Basename of the corresponding `.parquet` file |
 
 **Extending the schema**
 
-The schema is managed as an ordered list of migrations in `database.py`. To add new columns or tables (e.g. run type, avg HR, interval data), append a new entry to `_MIGRATIONS` — existing databases are upgraded automatically on next `open()`:
+The schema is managed as an ordered list of migrations in `database.py`. To add new columns or tables, append a new entry to `_MIGRATIONS` — existing databases are upgraded automatically on next `open()`:
 
 ```python
 _MIGRATIONS = [
@@ -279,24 +328,28 @@ _MIGRATIONS = [
 
 ## Dashboard Integration
 
-All chart functions return standard `Figure` objects, so they drop directly into Streamlit or Dash:
+All chart functions return standard `Figure` objects, so they embed directly into Streamlit or Dash:
 
 ```python
 # Streamlit
 import streamlit as st
 st.pyplot(runtrackz.charts.overview(run, config=cfg))
 
-# Dash
-import dash_core_components as dcc
-fig = runtrackz.charts.overview(run, config=cfg)
-# convert to plotly or save/embed as image
+# Dash — save to buffer and embed as image
+import io
+buf = io.BytesIO()
+runtrackz.charts.overview(run, config=cfg).savefig(buf, format="png")
 ```
 
 ## Supported Devices
 
-Tested with **Coros** wearables. Should work with any Garmin-compatible `.fit` file that contains standard `record` messages (global message number 20). Fields parsed:
+Tested with **Coros** and **Garmin** wearables. The binary FIT protocol is standard across all manufacturers; the per-second record data (HR, cadence, speed, distance, altitude) uses the same field numbers on both devices. Some session-level summary fields differ between manufacturers but this does not affect analysis quality.
+
+Fields parsed from record messages:
 
 - Heart rate, cadence, speed, distance, power
 - GPS position (latitude / longitude)
-- Altitude (enhanced and standard)
+- Altitude — enhanced field (Coros: field 54/55; Garmin: field 73/78) with fallback to legacy field
 - Running dynamics (vertical oscillation, stance time)
+
+Activity type (sport / sub-sport) is decoded from the FIT session message and exposed as `run.sport`, `run.sub_sport`, and `run.is_run`. The full FIT sport and sub-sport enum tables are included in `parser.py`.
