@@ -70,31 +70,157 @@ _RECORD_FIELD_MAP = {
     40:  ('stance_time_percent',   100,      0),   # %
     41:  ('stance_time',           10,       0),   # ms
     53:  ('fractional_cadence',    128,      0),   # rpm
-    54:  ('enhanced_altitude',     5,        500), # m
-    55:  ('enhanced_speed',        1000,     0),   # m/s
+    54:  ('enhanced_altitude',     5,        500), # m  — Coros
+    55:  ('enhanced_speed',        1000,     0),   # m/s — Coros
+    73:  ('enhanced_speed_2',      1000,     0),   # m/s — Garmin (same scale as field 55)
+    78:  ('enhanced_altitude_2',   5,        500), # m   — Garmin (same scale as field 54)
     253: ('timestamp',             1,        0),   # FIT epoch seconds
 }
 
 # Field number -> (name, scale, offset) for message 18 (session)
+# Field positions validated against Coros .fit files.
+# These differ from the standard Garmin FIT SDK profile for some fields;
+# each mapping has been confirmed by cross-checking raw values against
+# the same metrics computed from the per-second record messages.
 _SESSION_FIELD_MAP = {
-    2:   ('start_time',            1,    0),
-    7:   ('sport',                 1,    0),
-    9:   ('total_elapsed_time',    1000, 0),   # s
-    10:  ('total_timer_time',      1000, 0),   # s
-    11:  ('total_distance',        100,  0),   # m
-    13:  ('total_calories',        1,    0),   # kcal
-    15:  ('avg_speed',             1000, 0),   # m/s
-    16:  ('max_speed',             1000, 0),   # m/s
-    17:  ('avg_heart_rate',        1,    0),   # bpm
-    18:  ('max_heart_rate',        1,    0),   # bpm
-    19:  ('avg_cadence',           1,    0),   # rpm
-    20:  ('max_cadence',           1,    0),   # rpm
-    21:  ('avg_power',             1,    0),   # watts
-    22:  ('max_power',             1,    0),   # watts
-    25:  ('total_ascent',          1,    0),   # m
-    26:  ('total_descent',         1,    0),   # m
-    29:  ('num_laps',              1,    0),
-    253: ('timestamp',             1,    0),
+    2:   ('start_time',         1,    0),   # uint32, FIT epoch → datetime
+    5:   ('sport',              1,    0),   # enum uint8 → decoded to string below
+    6:   ('sub_sport',          1,    0),   # enum uint8 → decoded to string below
+    7:   ('total_elapsed_time', 1000, 0),   # uint32, ms → s (wall-clock time)
+    8:   ('total_timer_time',   1000, 0),   # uint32, ms → s (active time, excl. pauses)
+    9:   ('total_distance',     100,  0),   # uint32, cm → m
+    11:  ('total_calories',     1,    0),   # uint16, kcal
+    14:  ('avg_speed',          1000, 0),   # uint16, mm/s → m/s
+    15:  ('max_speed',          1000, 0),   # uint16, mm/s → m/s
+    16:  ('avg_heart_rate',     1,    0),   # uint8, bpm
+    17:  ('max_heart_rate',     1,    0),   # uint8, bpm
+    18:  ('avg_cadence',        1,    0),   # uint8, rpm (half-cadence; ×2 = steps/min)
+    19:  ('max_cadence',        1,    0),   # uint8, rpm (half-cadence; ×2 = steps/min)
+    22:  ('total_ascent',       1,    0),   # uint16, m
+    23:  ('total_descent',      1,    0),   # uint16, m
+    253: ('timestamp',          1,    0),   # uint32, FIT epoch → datetime
+}
+
+# FIT SDK sport enum (global message 0 field 7 / session field 7)
+_SPORT_NAMES: dict[int, str] = {
+    0:  'generic',
+    1:  'running',
+    2:  'cycling',
+    3:  'transition',
+    4:  'fitness_equipment',
+    5:  'swimming',
+    6:  'basketball',
+    7:  'soccer',
+    8:  'tennis',
+    9:  'american_football',
+    10: 'training',
+    11: 'walking',
+    12: 'cross_country_skiing',
+    13: 'alpine_skiing',
+    14: 'snowboarding',
+    15: 'rowing',
+    16: 'mountaineering',
+    17: 'hiking',
+    18: 'multisport',
+    19: 'paddling',
+    20: 'flying',
+    21: 'e_biking',
+    22: 'motorcycling',
+    23: 'boating',
+    24: 'driving',
+    25: 'golf',
+    26: 'hang_gliding',
+    27: 'horseback_riding',
+    28: 'hunting',
+    29: 'fishing',
+    30: 'inline_skating',
+    31: 'rock_climbing',
+    32: 'sailing',
+    33: 'ice_skating',
+    34: 'sky_diving',
+    35: 'snowshoeing',
+    36: 'snowmobiling',
+    37: 'stand_up_paddleboarding',
+    38: 'surfing',
+    39: 'wakeboarding',
+    40: 'water_skiing',
+    41: 'kayaking',
+    42: 'rafting',
+    43: 'windsurfing',
+    44: 'kitesurfing',
+    45: 'tactical',
+    46: 'jumpmaster',
+    47: 'boxing',
+    48: 'floor_climbing',
+    53: 'multisport',
+    254: 'all',
+}
+
+# FIT SDK sub_sport enum (same field across all sports; common running values shown first)
+_SUB_SPORT_NAMES: dict[int, str] = {
+    0:  'generic',
+    # Running sub-sports
+    1:  'treadmill',
+    2:  'street',
+    3:  'trail',
+    4:  'track',
+    # Cycling sub-sports
+    5:  'spin',
+    6:  'indoor_cycling',
+    7:  'road',
+    8:  'mountain',
+    9:  'downhill',
+    10: 'recumbent',
+    11: 'cyclocross',
+    12: 'hand_cycling',
+    13: 'track_cycling',
+    14: 'indoor_rowing',
+    15: 'elliptical',
+    16: 'stair_climbing',
+    17: 'lap_swimming',
+    18: 'open_water',
+    19: 'flexibility_training',
+    20: 'strength_training',
+    21: 'warm_up',
+    22: 'match',
+    23: 'exercise',
+    24: 'challenge',
+    25: 'indoor_skiing',
+    26: 'cardio_training',
+    27: 'indoor_walking',
+    28: 'e_bike_fitness',
+    29: 'bmx',
+    30: 'casual_walking',
+    31: 'speed_walking',
+    32: 'bike_to_run_transition',
+    33: 'run_to_bike_transition',
+    34: 'swim_to_bike_transition',
+    35: 'atv',
+    36: 'motocross',
+    37: 'backcountry',
+    38: 'resort',
+    39: 'rc_drone',
+    40: 'wingsuit',
+    41: 'whitewater',
+    42: 'skate_skiing',
+    43: 'yoga',
+    44: 'pilates',
+    45: 'indoor_running',
+    46: 'gravel_cycling',
+    47: 'e_bike_mountain',
+    48: 'commuting',
+    49: 'mixed_surface',
+    50: 'navigate',
+    51: 'track_me',
+    52: 'map',
+    53: 'single_gas_diving',
+    54: 'multi_gas_diving',
+    55: 'gauge_diving',
+    56: 'apnea_diving',
+    57: 'apnea_hunting',
+    58: 'virtual_activity',
+    59: 'obstacle',
+    254: 'all',
 }
 
 # Invalid / null values per base type (FIT SDK)
@@ -193,6 +319,24 @@ def _parse_fit(path: Path) -> tuple[list[dict], dict]:
                 record_rows.append(row)
             elif d['global'] == 18:
                 session_data = _decode_message(row, _SESSION_FIELD_MAP)
+
+    # Remove session values that decoded to a null sentinel.
+    # uint16 null (0xFFFF) with /1000 scale → 65.535; uint32 null with /1000 → 65535.535.
+    # Any speed above 50 m/s (180 km/h) is physically impossible for a run/ride.
+    for _key in ('avg_speed', 'max_speed'):
+        if session_data.get(_key, 0) > 50.0:
+            session_data.pop(_key, None)
+
+    # Decode sport/sub_sport integers to human-readable strings.
+    # Keep the raw integer as sport_id / sub_sport_id for exact comparisons.
+    if 'sport' in session_data:
+        sport_id = int(session_data['sport'])
+        session_data['sport_id']  = sport_id
+        session_data['sport']     = _SPORT_NAMES.get(sport_id, f'unknown_{sport_id}')
+    if 'sub_sport' in session_data:
+        sub_id = int(session_data['sub_sport'])
+        session_data['sub_sport_id'] = sub_id
+        session_data['sub_sport']    = _SUB_SPORT_NAMES.get(sub_id, f'unknown_{sub_id}')
 
     return record_rows, session_data
 
@@ -336,9 +480,13 @@ class RunData:
             if row['cadence'] is not None:
                 row['steps_per_min'] = row['cadence'] * 2
 
-            # Speed
+            # Speed: field 6 = legacy uint16 (Coros); field 73 = enhanced uint32 (Garmin).
+            # Both use scale ÷1000 → m/s.
             spd = r.get(6)
-            if spd is not None and spd != 0xFFFF:
+            if spd is None or spd == 0xFFFF:
+                v = r.get(73)
+                spd = v if (v is not None and v != 0xFFFFFFFF) else None
+            if spd is not None:
                 row['speed_ms'] = spd / 1000.0
                 row['speed_kmh'] = row['speed_ms'] * 3.6
                 row['pace_min_km'] = (1000.0 / row['speed_ms'] / 60.0) if row['speed_ms'] > 0 else None
@@ -349,9 +497,10 @@ class RunData:
             dist = r.get(5)
             row['distance_m'] = dist / 100.0 if (dist is not None and dist != 0xFFFFFFFF) else None
 
-            # Altitude (prefer enhanced_altitude field 54, fall back to field 2)
-            alt = r.get(54) or r.get(2)
-            row['altitude_m'] = (alt / 5.0 - 500.0) if (alt is not None and alt != 0xFFFF) else None
+            # Altitude: field 54 = enhanced uint32 (Coros), field 78 = enhanced uint32 (Garmin),
+            # field 2 = legacy uint16 (any device).  All use scale ÷5, offset -500 → metres.
+            alt = r.get(54) or r.get(78) or r.get(2)
+            row['altitude_m'] = (alt / 5.0 - 500.0) if (alt is not None and alt not in (0xFFFF, 0xFFFFFFFF)) else None
 
             # Power
             pwr = r.get(7)
@@ -377,6 +526,42 @@ class RunData:
             df = df.set_index('timestamp').sort_index()
             df['elapsed_s'] = (df.index - df.index[0]).total_seconds()
         return df
+
+    # ── Activity type helpers ─────────────────────────────────────────────
+
+    @property
+    def sport(self) -> str:
+        """
+        Human-readable sport name from the FIT session message
+        (e.g. ``'running'``, ``'cycling'``, ``'walking'``).
+
+        Returns ``'unknown'`` if the field was not present in the file.
+        """
+        return self.session.get('sport', 'unknown')
+
+    @property
+    def sub_sport(self) -> str:
+        """
+        Human-readable sub-sport name from the FIT session message
+        (e.g. ``'trail'``, ``'treadmill'``, ``'street'``, ``'track'``).
+
+        Returns ``'generic'`` if the field was not present in the file.
+        """
+        return self.session.get('sub_sport', 'generic')
+
+    @property
+    def is_run(self) -> bool:
+        """
+        ``True`` when the activity is a running activity
+        (sport == ``'running'``).
+
+        Use this to filter out non-run files before analysis::
+
+            run = runtrackz.load("my_activity.fit")
+            if not run.is_run:
+                raise ValueError(f"Expected a run, got '{run.sport}'")
+        """
+        return self.sport == 'running'
 
     def save_parquet(self, path: Union[str, Path]) -> Path:
         """
@@ -463,8 +648,12 @@ class RunData:
             return "RunData(empty)"
         duration = self.df['elapsed_s'].max()
         dist = self.df['distance_m'].max() if 'distance_m' in self.df else 0
+        sport_str = self.sport
+        if self.sub_sport not in ('generic', 'unknown'):
+            sport_str += f'/{self.sub_sport}'
         return (
             f"RunData("
+            f"sport={sport_str}, "
             f"date={self.df.index[0].date()}, "
             f"duration={duration/60:.1f}min, "
             f"distance={dist/1000:.2f}km, "
