@@ -73,6 +73,9 @@ _MIGRATIONS: list[tuple[int, str, str]] = [
             duration_s       DOUBLE,              -- moving time in seconds
             trimp            DOUBLE,              -- Training Impulse (Bangsbo)
 
+            -- Storage
+            parquet_file     TEXT,                -- basename of the processed .parquet file
+
             -- Constraints
             UNIQUE (fit_file, run_date)           -- prevent duplicate imports
         );
@@ -211,6 +214,7 @@ class RunDatabase:
         run: "RunData",          # noqa: F821
         hr_stats: "HRStats",     # noqa: F821
         pace_stats: "PaceStats", # noqa: F821
+        parquet_file: "Optional[Union[str, Path]]" = None,  # noqa: F821
         overwrite: bool = False,
     ) -> int:
         """
@@ -224,6 +228,9 @@ class RunDatabase:
             Result from :func:`runtrackz.hr_analysis.analyze`.
         pace_stats : PaceStats
             Result from :func:`runtrackz.pace_analysis.analyze`.
+        parquet_file : str or Path, optional
+            Path (or basename) of the ``.parquet`` file written for this run.
+            Only the filename is stored, not the full path.
         overwrite : bool
             If True, replace an existing row with the same fit_file + run_date.
             If False (default), raise an error on duplicate.
@@ -233,11 +240,13 @@ class RunDatabase:
         int
             The ``id`` of the inserted row.
         """
+        from pathlib import Path as _Path
         from runtrackz import __version__
 
-        fit_file    = run.source_file.name
-        run_date    = run.df.index[0].date()
+        fit_file     = run.source_file.name
+        run_date     = run.df.index[0].date()
         processed_at = datetime.datetime.now(datetime.timezone.utc)
+        parquet_name = _Path(parquet_file).name if parquet_file is not None else None
 
         if overwrite:
             self._con.execute(
@@ -249,8 +258,8 @@ class RunDatabase:
             """
             INSERT INTO runs
                 (fit_file, runtrackz_version, run_date, processed_at,
-                 distance_km, duration_s, trimp)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                 distance_km, duration_s, trimp, parquet_file)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 fit_file,
@@ -260,6 +269,7 @@ class RunDatabase:
                 round(pace_stats.total_distance_km, 4),
                 round(pace_stats.total_time_s, 1),
                 round(hr_stats.trimp, 2),
+                parquet_name,
             ],
         )
         self._con.commit()

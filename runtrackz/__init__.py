@@ -31,13 +31,13 @@ Modules
 - runtrackz.config       : YAML config loader
 """
 
-from runtrackz.parser import load, load_parquet, RunData
+from runtrackz.parser import load, load_parquet, make_parquet_path, RunData
 from runtrackz.config import load_config, Config
 from runtrackz import hr_analysis, pace_analysis, charts, config, database
 
 __version__ = "0.1.0"
 __all__ = [
-    "load", "load_parquet", "RunData",
+    "load", "load_parquet", "make_parquet_path", "RunData",
     "load_config", "Config",
     "hr_analysis", "pace_analysis", "charts", "config",
     "database",

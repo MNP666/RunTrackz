@@ -31,7 +31,6 @@ DB_PATH   = _DATA_DIR / "database" / "runs.db"
 
 def main(fit_path: str, overwrite: bool = False):
     fit_path = Path(fit_path)
-    stem = fit_path.stem
 
     # ── 1. Load config & run ─────────────────────────────────────────────
     print(f"\nLoading: {fit_path}")
@@ -78,7 +77,7 @@ def main(fit_path: str, overwrite: bool = False):
 
     # ── 5. Parquet ───────────────────────────────────────────────────────
     print("\n" + "="*60)
-    parquet_path = _DATA_DIR / "processed" / f"{stem}.parquet"
+    parquet_path = runtrackz.make_parquet_path(run, _DATA_DIR / "processed")
     saved = run.save_parquet(parquet_path)
     print(f"Saved parsed run to: {saved}")
 
@@ -88,7 +87,8 @@ def main(fit_path: str, overwrite: bool = False):
     print(f"Saving to database: {DB_PATH}")
     with runtrackz.database.open(DB_PATH) as db:
         try:
-            row_id = db.insert_run(run, hr_stats, pace_stats, overwrite=overwrite)
+            row_id = db.insert_run(run, hr_stats, pace_stats,
+                                   parquet_file=saved, overwrite=overwrite)
             print(f"  Inserted run id={row_id}")
         except Exception as e:
             print(f"  Skipped (already in database): {e}")

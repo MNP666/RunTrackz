@@ -401,6 +401,44 @@ def load(path: Union[str, Path]) -> 'RunData':
     return RunData._from_raw(raw_records, session, path)
 
 
+def make_parquet_path(run: 'RunData', directory: Union[str, Path]) -> Path:
+    """
+    Generate a dated parquet filename for a run, auto-incrementing the
+    counter when more than one run already exists on the same date.
+
+    Format: ``DDMMYYYY_run_NN.parquet``
+
+    Examples
+    --------
+    First run on 12 March 2026:
+        ``12032026_run_01.parquet``
+
+    Second run recorded the same day:
+        ``12032026_run_02.parquet``
+
+    Parameters
+    ----------
+    run : RunData
+        The parsed run whose date will be used.
+    directory : str or Path
+        Destination directory (e.g. ``data/processed``).
+
+    Returns
+    -------
+    Path
+        Full path to the next available parquet file.
+    """
+    directory = Path(directory)
+    date_str = run.df.index[0].strftime('%d%m%Y')   # e.g. '12032026'
+    existing = sorted(directory.glob(f'{date_str}_run_*.parquet'))
+    if existing:
+        last_idx = int(existing[-1].stem.rsplit('_', 1)[-1])
+        idx = last_idx + 1
+    else:
+        idx = 1
+    return directory / f'{date_str}_run_{idx:02d}.parquet'
+
+
 def load_parquet(path: Union[str, Path]) -> 'RunData':
     """
     Load a :class:`RunData` from a Parquet file written by
