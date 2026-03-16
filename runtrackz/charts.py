@@ -59,16 +59,15 @@ def _format_elapsed(val: float, _pos=None) -> str:
     return f"{m}:{s:02d}"
 
 
-def _km_labels(ax, dist_col, elapsed_col, df):
-    """Add vertical km markers to the x-axis."""
-    if dist_col not in df.columns:
+def _km_labels(ax, dist_col, elapsed_min_col, df):
+    """Add vertical km markers to the x-axis (x-axis must be in minutes)."""
+    if dist_col not in df.columns or elapsed_min_col not in df.columns:
         return
-    prev_km = 0
     for km in range(1, int(df[dist_col].max() / 1000) + 1):
         row = df[df[dist_col] >= km * 1000].first_valid_index()
         if row is not None:
-            x = df.loc[row, elapsed_col]
-            ax.axvline(x, color='gray', alpha=0.3, linewidth=0.8, linestyle='--')
+            x_min = df.loc[row, elapsed_min_col]
+            ax.axvline(x_min, color='gray', alpha=0.3, linewidth=0.8, linestyle='--')
 
 
 # ---------------------------------------------------------------------------
@@ -114,7 +113,7 @@ def heart_rate_over_time(
     # Shade zone bands
     if hr_zones:
         for znum, (lo, hi, label) in hr_zones.items():
-            ax.axhspan(lo, hi, alpha=0.08, color=zone_colors.get(znum, '#aaaaaa'))
+            ax.axhspan(lo, hi, alpha=0.28, color=zone_colors.get(znum, '#aaaaaa'))
             ax.text(x.max() * 1.005, (lo + hi) / 2, f"Z{znum}",
                     va='center', ha='left', fontsize=7, color=zone_colors.get(znum, '#aaaaaa'))
 
@@ -357,7 +356,8 @@ def overview(
     zone_colors = config.zone_colors if config else ZONE_COLORS
 
     df = run.df.reset_index()
-    x = df['elapsed_s'] / 60  # minutes
+    df['elapsed_min'] = df['elapsed_s'] / 60
+    x = df['elapsed_min']
 
     fig = plt.figure(figsize=figsize)
     gs = fig.add_gridspec(2, 3, hspace=0.4, wspace=0.35)
@@ -376,8 +376,8 @@ def overview(
         hr_zones = {zn: (z.lower_bpm, z.upper_bpm, z.name)
                     for zn, z in hr_stats.zones.items()}
         for znum, (lo, hi, _) in hr_zones.items():
-            ax_hr.axhspan(lo, hi, alpha=0.08, color=zone_colors.get(znum, '#aaa'))
-        ax_hr.plot(x, df['heart_rate'], color='#e03030', linewidth=1.1, alpha=0.9)
+            ax_hr.axhspan(lo, hi, alpha=0.28, color=zone_colors.get(znum, '#aaa'))
+        ax_hr.plot(x, df['heart_rate'], color='k', linewidth=1.1, alpha=0.9)
         # Lactate threshold HR line
         if config and config.lactate_threshold.heart_rate:
             lt_hr = config.lactate_threshold.heart_rate
@@ -387,7 +387,13 @@ def overview(
         ax_hr.set_ylabel("HR (bpm)")
         ax_hr.set_title(f"Heart Rate  ·  avg {hr_stats.avg_hr:.0f}  max {hr_stats.max_hr:.0f} bpm")
         ax_hr.grid(True, alpha=0.3)
-        _km_labels(ax_hr, 'distance_m', 'elapsed_s', df.assign(elapsed_s=df['elapsed_s']))
+        # km markers (x-axis is in minutes)
+        _km_labels(ax_hr, 'distance_m', 'elapsed_min', df)
+        # Scale x-axis ticks to run duration
+        duration_min = x.max()
+        tick_interval = 5 if duration_min <= 35 else 10 if duration_min <= 90 else 15
+        ax_hr.xaxis.set_major_locator(mticker.MultipleLocator(tick_interval))
+        ax_hr.set_xlim(0, duration_min)
         ax_hr.set_xlabel("Time (min)")
 
     # ── Panel 2: HR Zone pie ─────────────────────────────────────────────

@@ -214,9 +214,9 @@ fig.savefig("chart.png", dpi=150, bbox_inches="tight")
 
 | Scheme | Description |
 |---|---|
-| `default` | Blue → green → yellow → orange → red |
-| `hsv` | Evenly-spaced HSV hues (scales to any number of zones) |
-| `matplotlib` | Matplotlib default cycle (C0–C5 / tab10) |
+| `default` | Custom blue → green → yellow → orange → red |
+| `spectral` | Matplotlib Spectral colormap (cool → warm diverging) |
+| `rainbow` | Matplotlib rainbow colormap (violet → red) |
 
 ## Dashboard Integration
 

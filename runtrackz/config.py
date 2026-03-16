@@ -48,28 +48,13 @@ _COLORS_DEFAULT = {
     6: "#a020a0",  # extra zone if 6 zones
 }
 
-# Matplotlib default cycle (C0–C5)
-_COLORS_MATPLOTLIB = {
-    1: "#1f77b4",
-    2: "#ff7f0e",
-    3: "#2ca02c",
-    4: "#d62728",
-    5: "#9467bd",
-    6: "#8c564b",
-}
-
-
-def _hsv_colors(n: int) -> Dict[int, str]:
-    """Generate n evenly-spaced HSV colours as hex strings."""
-    import colorsys
-    result = {}
-    for i in range(n):
-        hue = i / n
-        r, g, b = colorsys.hsv_to_rgb(hue, 0.75, 0.88)
-        result[i + 1] = "#{:02x}{:02x}{:02x}".format(
-            int(r * 255), int(g * 255), int(b * 255)
-        )
-    return result
+def _cmap_colors(cmap_name: str, n: int) -> Dict[int, str]:
+    """Sample n evenly-spaced colours from a matplotlib colormap."""
+    import matplotlib.pyplot as plt
+    import matplotlib.colors as mcolors
+    cmap = plt.get_cmap(cmap_name)
+    positions = [i / (n - 1) if n > 1 else 0.5 for i in range(n)]
+    return {i + 1: mcolors.to_hex(cmap(p)) for i, p in enumerate(positions)}
 
 
 # ---------------------------------------------------------------------------
@@ -180,10 +165,10 @@ def _default_zones(max_hr: int, resting_hr: int) -> ZoneConfig:
 
 
 def _resolve_colors(scheme: str, n: int) -> Dict[int, str]:
-    if scheme == "hsv":
-        return _hsv_colors(n)
-    elif scheme == "matplotlib":
-        return {k: v for k, v in list(_COLORS_MATPLOTLIB.items())[:n]}
+    if scheme == "spectral":
+        return _cmap_colors("Spectral", n)
+    elif scheme == "rainbow":
+        return _cmap_colors("rainbow", n)
     else:  # default
         return {k: v for k, v in list(_COLORS_DEFAULT.items())[:n]}
 
@@ -295,9 +280,9 @@ def load_config(path: Optional[str | Path] = None) -> Config:
     # ── charts ───────────────────────────────────────────────────────────
     charts_raw = raw.get("charts", {})
     color_scheme = str(charts_raw.get("color_scheme", "default")).lower()
-    if color_scheme not in ("default", "hsv", "matplotlib"):
+    if color_scheme not in ("default", "spectral", "rainbow"):
         raise ValueError(
-            f"charts.color_scheme must be 'default', 'hsv', or 'matplotlib' "
+            f"charts.color_scheme must be 'default', 'spectral', or 'rainbow' "
             f"(got '{color_scheme}')."
         )
 
