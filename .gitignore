@@ -41,6 +41,11 @@ data/database/*
 *.csv
 *.parquet
 
+# ── examples/ folder — scripts are tracked, data files are not ───────────────
+# .fit files are already excluded by *.fit above.
+# .gitkeep keeps the folder visible in the repo.
+!examples/.gitkeep
+
 # ── IDEs & editors ────────────────────────────────────────────────────────────
 .idea/
 .vscode/

@@ -87,17 +87,16 @@ _MIGRATIONS: list[tuple[int, str, str]] = [
         );
         """,
     ),
+    (
+        2,
+        "Add run_type and avg_hr columns",
+        """
+        ALTER TABLE runs ADD COLUMN run_type TEXT;
+        ALTER TABLE runs ADD COLUMN avg_hr   DOUBLE;
+        """,
+    ),
     # ── Future migrations go here ────────────────────────────────────────────
     # Example — uncomment and extend when ready:
-    #
-    # (
-    #     2,
-    #     "Add run_type and avg_hr columns",
-    #     """
-    #     ALTER TABLE runs ADD COLUMN run_type TEXT DEFAULT 'run';
-    #     ALTER TABLE runs ADD COLUMN avg_hr   DOUBLE;
-    #     """,
-    # ),
     #
     # (
     #     3,
@@ -215,6 +214,7 @@ class RunDatabase:
         hr_stats: "HRStats",     # noqa: F821
         pace_stats: "PaceStats", # noqa: F821
         parquet_file: "Optional[Union[str, Path]]" = None,  # noqa: F821
+        run_type: Optional[str] = None,
         overwrite: bool = False,
     ) -> int:
         """
@@ -231,6 +231,10 @@ class RunDatabase:
         parquet_file : str or Path, optional
             Path (or basename) of the ``.parquet`` file written for this run.
             Only the filename is stored, not the full path.
+        run_type : str, optional
+            Run type label, e.g. ``'easy'``, ``'tempo'``, ``'long_run'``,
+            ``'workout'``.  Use the constants in :mod:`runtrackz.run_type`.
+            Stored as-is; ``None`` when not provided.
         overwrite : bool
             If True, replace an existing row with the same fit_file + run_date.
             If False (default), raise an error on duplicate.
@@ -258,8 +262,9 @@ class RunDatabase:
             """
             INSERT INTO runs
                 (fit_file, runtrackz_version, run_date, processed_at,
-                 distance_km, duration_s, trimp, parquet_file)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                 distance_km, duration_s, trimp, parquet_file,
+                 run_type, avg_hr)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 fit_file,
@@ -270,6 +275,8 @@ class RunDatabase:
                 round(pace_stats.total_time_s, 1),
                 round(hr_stats.trimp, 2),
                 parquet_name,
+                run_type,
+                round(hr_stats.avg_hr, 1) if hr_stats.avg_hr is not None else None,
             ],
         )
         self._con.commit()

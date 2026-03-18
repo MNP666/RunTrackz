@@ -24,16 +24,25 @@ Quick start
 
 Modules
 -------
-- runtrackz.parser       : .fit file loading (built-in pure-Python)
-- runtrackz.hr_analysis  : HR zones, TRIMP, aerobic decoupling
-- runtrackz.pace_analysis: pace, splits, power, elevation
-- runtrackz.charts       : matplotlib visualizations
-- runtrackz.config       : YAML config loader
+- runtrackz.parser          : .fit file loading (built-in pure-Python)
+- runtrackz.hr_analysis     : HR zones, TRIMP, aerobic decoupling
+- runtrackz.pace_analysis   : pace, splits, power, elevation
+- runtrackz.charts          : matplotlib visualizations
+- runtrackz.config          : YAML config loader
+- runtrackz.run_type           : run type constants and heuristic classifier
+- runtrackz.long_run_analysis  : pacing strategy, thirds, cardiac drift
+- runtrackz.tempo_analysis     : HR drift, pace CV, time at threshold
+- runtrackz.workout_analysis   : interval detection (stub), pace consistency
+- runtrackz.treadmill_analysis : GAP, gradient schedule, per-segment metrics
 """
 
 from runtrackz.parser import load, load_parquet, make_parquet_path, RunData
 from runtrackz.config import load_config, Config
-from runtrackz import hr_analysis, pace_analysis, charts, config, database
+from runtrackz import (
+    hr_analysis, pace_analysis, charts, config, database,
+    run_type, long_run_analysis, tempo_analysis, workout_analysis,
+    treadmill_analysis,
+)
 
 __version__ = "0.1.0"
 __all__ = [
@@ -41,4 +50,6 @@ __all__ = [
     "load_config", "Config",
     "hr_analysis", "pace_analysis", "charts", "config",
     "database",
+    "run_type", "long_run_analysis", "tempo_analysis", "workout_analysis",
+    "treadmill_analysis",
 ]

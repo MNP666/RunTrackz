@@ -5,14 +5,18 @@ Scans data/raw/ for .fit files, parses each one, saves a dated Parquet file
 to data/processed/, and inserts a record into the DuckDB database.
 
 Usage:
-    python process_runs.py [--overwrite] [--dry-run]
+    python process_runs.py [--overwrite] [--dry-run] [--run-type TYPE]
 
 Options:
-    --overwrite  Replace existing database entries (and parquet files) for
-                 runs that have already been processed.
-    --dry-run    Parse and validate every file but do not write parquet files
-                 or touch the database.  Useful for a first inspection of a
-                 new batch of files.
+    --overwrite       Replace existing database entries (and parquet files) for
+                      runs that have already been processed.
+    --dry-run         Parse and validate every file but do not write parquet
+                      files or touch the database.  Useful for a first
+                      inspection of a new batch of files.
+    --run-type TYPE   Tag every run in this batch with the given run type, e.g.
+                      --run-type tempo   or   --run-type long_run.
+                      Valid values: easy, long_run, tempo, workout, race.
+                      Leave unset to store NULL (you can update later via SQL).
 """
 
 import sys
@@ -30,7 +34,7 @@ PROCESSED_DIR = _DATA_DIR / "processed"
 DB_PATH       = _DATA_DIR / "database" / "runs.db"
 
 
-def process_all(overwrite: bool = False, dry_run: bool = False) -> None:
+def process_all(overwrite: bool = False, dry_run: bool = False, run_type: str | None = None) -> None:
     fit_files = sorted(
         p for p in RAW_DIR.iterdir()
         if p.suffix.lower() == ".fit"
@@ -43,6 +47,8 @@ def process_all(overwrite: bool = False, dry_run: bool = False) -> None:
     print(f"Found {len(fit_files)} .fit file(s) in {RAW_DIR}")
     if dry_run:
         print("DRY RUN — no files will be written or inserted.\n")
+    if run_type:
+        print(f"Run type tag  : {run_type}\n")
 
     cfg = runtrackz.load_config()
 
@@ -106,6 +112,7 @@ def process_all(overwrite: bool = False, dry_run: bool = False) -> None:
                 db_ctx.insert_run(
                     run, hr_stats, pace_stats,
                     parquet_file=saved,
+                    run_type=run_type,
                     overwrite=overwrite,
                 )
                 print(f"ok  → {saved.name}")
@@ -152,14 +159,33 @@ def process_all(overwrite: bool = False, dry_run: bool = False) -> None:
 
 
 if __name__ == "__main__":
-    flags     = {a for a in sys.argv[1:] if a.startswith("--")}
-    overwrite = "--overwrite" in flags
-    dry_run   = "--dry-run"   in flags
+    import runtrackz.run_type as _rt
 
-    unknown = flags - {"--overwrite", "--dry-run"}
+    argv      = sys.argv[1:]
+    overwrite = "--overwrite" in argv
+    dry_run   = "--dry-run"   in argv
+
+    # --run-type VALUE  (value is the next positional token after the flag)
+    run_type: str | None = None
+    if "--run-type" in argv:
+        idx = argv.index("--run-type")
+        if idx + 1 >= len(argv) or argv[idx + 1].startswith("--"):
+            print("Error: --run-type requires a value, e.g. --run-type tempo")
+            sys.exit(1)
+        run_type = argv[idx + 1]
+        if run_type not in _rt.ALL_TYPES:
+            print(f"Error: unknown run type '{run_type}'.  "
+                  f"Valid values: {', '.join(_rt.ALL_TYPES)}")
+            sys.exit(1)
+
+    # Collect all flag tokens (including --run-type and its value)
+    known_flags: set[str] = {"--overwrite", "--dry-run", "--run-type"}
+    # Filter out --run-type's value token before checking for unknowns
+    flag_tokens = [a for a in argv if a.startswith("--")]
+    unknown     = set(flag_tokens) - known_flags
     if unknown:
         print(f"Unknown flag(s): {', '.join(sorted(unknown))}")
-        print("Usage: python process_runs.py [--overwrite] [--dry-run]")
+        print("Usage: python process_runs.py [--overwrite] [--dry-run] [--run-type TYPE]")
         sys.exit(1)
 
-    process_all(overwrite=overwrite, dry_run=dry_run)
+    process_all(overwrite=overwrite, dry_run=dry_run, run_type=run_type)

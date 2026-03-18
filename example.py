@@ -3,11 +3,17 @@ example.py — runtrackz usage demonstration
 -------------------------------------------
 Run this script from the project root:
 
-    python example.py path/to/your_run.fit
+    python example.py path/to/your_run.fit [--overwrite] [--run-type TYPE]
 
 It will print a summary, save overview charts, store the parsed DataFrame as a
 Parquet file in data/processed/, and record the run in data/database/runs.db.
 Re-running with the same file is safe — pass --overwrite to replace the entry.
+
+Options:
+    --overwrite       Replace existing database entry if the file was already
+                      processed.
+    --run-type TYPE   Tag this run with a type label, e.g. --run-type tempo.
+                      Valid values: easy, long_run, tempo, workout, race.
 
 Folder layout created automatically:
     data/
@@ -29,7 +35,7 @@ _DATA_DIR = Path(__file__).parent / "data"
 DB_PATH   = _DATA_DIR / "database" / "runs.db"
 
 
-def main(fit_path: str, overwrite: bool = False):
+def main(fit_path: str, overwrite: bool = False, run_type: str | None = None):
     fit_path = Path(fit_path)
 
     # ── 1. Load config & run ─────────────────────────────────────────────
@@ -88,7 +94,8 @@ def main(fit_path: str, overwrite: bool = False):
     with runtrackz.database.open(DB_PATH) as db:
         try:
             row_id = db.insert_run(run, hr_stats, pace_stats,
-                                   parquet_file=saved, overwrite=overwrite)
+                                   parquet_file=saved, run_type=run_type,
+                                   overwrite=overwrite)
             print(f"  Inserted run id={row_id}")
         except Exception as e:
             print(f"  Skipped (already in database): {e}")
@@ -101,11 +108,27 @@ def main(fit_path: str, overwrite: bool = False):
 
 
 if __name__ == '__main__':
-    args = [a for a in sys.argv[1:] if not a.startswith('--')]
-    flags = [a for a in sys.argv[1:] if a.startswith('--')]
+    import runtrackz.run_type as _rt
+
+    argv  = sys.argv[1:]
+    flags = [a for a in argv if a.startswith('--')]
+    args  = [a for a in argv if not a.startswith('--')]
 
     if not args:
-        print("Usage: python example.py path/to/run.fit [--overwrite]")
+        print("Usage: python example.py path/to/run.fit [--overwrite] [--run-type TYPE]")
         sys.exit(1)
 
-    main(args[0], overwrite='--overwrite' in flags)
+    # --run-type VALUE
+    run_type: str | None = None
+    if '--run-type' in argv:
+        idx = argv.index('--run-type')
+        if idx + 1 >= len(argv) or argv[idx + 1].startswith('--'):
+            print("Error: --run-type requires a value, e.g. --run-type tempo")
+            sys.exit(1)
+        run_type = argv[idx + 1]
+        if run_type not in _rt.ALL_TYPES:
+            print(f"Error: unknown run type '{run_type}'.  "
+                  f"Valid values: {', '.join(_rt.ALL_TYPES)}")
+            sys.exit(1)
+
+    main(args[0], overwrite='--overwrite' in flags, run_type=run_type)
