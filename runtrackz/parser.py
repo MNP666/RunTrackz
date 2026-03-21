@@ -17,6 +17,97 @@ from typing import Union
 import pandas as pd
 
 # ---------------------------------------------------------------------------
+# Public DataFrame schema contract
+# ---------------------------------------------------------------------------
+
+#: Formal specification of the per-second DataFrame produced by the built-in
+#: parser and consumed by all RunTrackz analysis modules.
+#:
+#: Any external parser (e.g. FitTrackz) that wants to supply data to RunTrackz
+#: must produce a DataFrame whose columns match this contract.  Pass the result
+#: to :meth:`RunData.from_dataframe` — it will derive any missing-but-computable
+#: columns automatically before validating.
+#:
+#: **Index**: UTC-aware :class:`pandas.DatetimeIndex`
+#: (``dtype='datetime64[ns, UTC]'``).  Must be sorted ascending.
+#:
+#: Format: ``{column_name: {"unit", "description", "required"}}``
+DATAFRAME_SCHEMA: dict[str, dict] = {
+    # ── Required ──────────────────────────────────────────────────────────
+    "heart_rate": {
+        "unit": "bpm",
+        "description": "Heart rate",
+        "required": True,
+    },
+    "speed_ms": {
+        "unit": "m/s",
+        "description": "Speed",
+        "required": True,
+    },
+    "speed_kmh": {
+        "unit": "km/h",
+        "description": "Speed (derived from speed_ms if absent)",
+        "required": True,
+    },
+    "pace_min_km": {
+        "unit": "min/km (decimal)",
+        "description": "Pace (derived from speed_ms if absent)",
+        "required": True,
+    },
+    "distance_m": {
+        "unit": "m",
+        "description": "Cumulative distance from activity start",
+        "required": True,
+    },
+    "elapsed_s": {
+        "unit": "s",
+        "description": "Elapsed time from activity start (derived from index if absent)",
+        "required": True,
+    },
+    # ── Optional ──────────────────────────────────────────────────────────
+    "altitude_m": {
+        "unit": "m",
+        "description": "Altitude above sea level",
+        "required": False,
+    },
+    "power_w": {
+        "unit": "W",
+        "description": "Running power (e.g. Stryd foot pod)",
+        "required": False,
+    },
+    "cadence": {
+        "unit": "rpm",
+        "description": "Cadence — single-foot strikes per minute",
+        "required": False,
+    },
+    "steps_per_min": {
+        "unit": "spm",
+        "description": "Running cadence (cadence × 2)",
+        "required": False,
+    },
+    "latitude": {
+        "unit": "degrees",
+        "description": "GPS latitude",
+        "required": False,
+    },
+    "longitude": {
+        "unit": "degrees",
+        "description": "GPS longitude",
+        "required": False,
+    },
+    "vertical_oscillation_cm": {
+        "unit": "cm",
+        "description": "Vertical oscillation",
+        "required": False,
+    },
+    "stance_time_ms": {
+        "unit": "ms",
+        "description": "Ground contact time",
+        "required": False,
+    },
+}
+
+# ---------------------------------------------------------------------------
 # FIT protocol constants
 # ---------------------------------------------------------------------------
 
@@ -458,20 +549,26 @@ def load_parquet(path: Union[str, Path]) -> 'RunData':
 
 class RunData:
     """
-    Container for a single run parsed from a .fit file.
+    Container for a single parsed run.
 
     Attributes
     ----------
     df : pd.DataFrame
-        Per-second data with columns: heart_rate, cadence, steps_per_min,
-        speed_ms, speed_kmh, pace_min_km, distance_m, altitude_m, power_w,
-        latitude, longitude, vertical_oscillation_cm, stance_time_ms,
-        elapsed_s.
+        Per-second data indexed by UTC timestamp.  Columns conform to
+        :data:`DATAFRAME_SCHEMA`.
     session : dict
         Summary fields from the FIT session message (total distance, avg HR,
-        avg speed, total ascent, etc.).
+        avg speed, total ascent, etc.).  May be empty when constructed via
+        :meth:`from_dataframe` without session data.
     source_file : Path
-        Path of the original .fit file.
+        Path to the original ``.fit`` file (or ``Path('external')`` when
+        constructed from an external parser).
+    is_smoothed : bool
+        ``True`` when the data has been pre-smoothed by an external tool
+        (e.g. FitTrackz).  Analysis modules that apply their own internal
+        rolling median pass honour this flag — pass ``smooth_window=1`` to
+        those functions to skip their internal smoothing when data is already
+        clean.
     """
 
     def __init__(
@@ -479,10 +576,12 @@ class RunData:
         df: pd.DataFrame,
         session: dict,
         source_file: Path,
+        is_smoothed: bool = False,
     ):
         self.df = df
         self.session = session
         self.source_file = source_file
+        self.is_smoothed = is_smoothed
 
     @classmethod
     def _from_raw(
@@ -493,6 +592,231 @@ class RunData:
     ) -> 'RunData':
         df = cls._build_df(raw_records)
         return cls(df=df, session=session, source_file=path)
+
+    # ── External-parser entry point ───────────────────────────────────────
+
+    @classmethod
+    def from_dataframe(
+        cls,
+        df: pd.DataFrame,
+        session: dict,
+        source_file: Union[str, Path, None] = None,
+        is_smoothed: bool = False,
+    ) -> 'RunData':
+        """
+        Construct a :class:`RunData` from a pre-built DataFrame.
+
+        This is the primary integration point for external parsers such as
+        **FitTrackz**.  The DataFrame must have a UTC-aware
+        :class:`~pandas.DatetimeIndex` and conform to :data:`DATAFRAME_SCHEMA`.
+
+        Missing-but-derivable columns are computed automatically:
+
+        - ``elapsed_s`` — derived from the index if absent.
+        - ``speed_kmh`` — derived from ``speed_ms`` if absent.
+        - ``speed_ms`` — derived from ``speed_kmh`` if absent.
+        - ``pace_min_km`` — derived from ``speed_ms`` if absent.
+
+        Parameters
+        ----------
+        df : pd.DataFrame
+            Per-second data.  See :data:`DATAFRAME_SCHEMA` for the full
+            column contract.
+        session : dict
+            Activity-level summary (sport, total_distance, avg_hr, etc.).
+            Can be empty — all analysis uses the per-second DataFrame.
+        source_file : str or Path, optional
+            Path to the original ``.fit`` file.  Used for display and
+            parquet metadata only.  Defaults to ``Path('external')``.
+        is_smoothed : bool
+            Set to ``True`` when the data has already been smoothed by the
+            caller (e.g. FitTrackz applied a Kalman or Gaussian filter).
+            Analysis modules that do their own rolling-median pass will note
+            this; pass ``smooth_window=1`` to those functions to skip their
+            internal smoothing.
+
+        Returns
+        -------
+        RunData
+
+        Raises
+        ------
+        ValueError
+            If the index is not a DatetimeIndex or required columns are
+            missing and cannot be derived.
+
+        Examples
+        --------
+        Typical usage from FitTrackz (Rust parser):
+
+        .. code-block:: python
+
+            import runtrackz
+            from fittrackz import load as ft_load   # hypothetical
+
+            df, session = ft_load("my_run.fit", smooth=True)
+            run = runtrackz.RunData.from_dataframe(
+                df, session, source_file="my_run.fit", is_smoothed=True
+            )
+            hr = runtrackz.hr_analysis.analyze(run, config=cfg)
+        """
+        df = df.copy()
+
+        # ── Index: ensure UTC-aware DatetimeIndex ─────────────────────────
+        if not isinstance(df.index, pd.DatetimeIndex):
+            raise ValueError(
+                "DataFrame index must be a pandas DatetimeIndex.  "
+                f"Got {type(df.index).__name__!r}."
+            )
+        if df.index.tz is None:
+            df.index = df.index.tz_localize("UTC")
+        elif str(df.index.tz).upper() != "UTC":
+            df.index = df.index.tz_convert("UTC")
+
+        df = df.sort_index()
+
+        # ── Derive missing-but-computable columns ─────────────────────────
+        if "elapsed_s" not in df.columns:
+            df["elapsed_s"] = (df.index - df.index[0]).total_seconds()
+
+        if "speed_kmh" not in df.columns and "speed_ms" in df.columns:
+            df["speed_kmh"] = df["speed_ms"] * 3.6
+
+        if "speed_ms" not in df.columns and "speed_kmh" in df.columns:
+            df["speed_ms"] = df["speed_kmh"] / 3.6
+
+        if "pace_min_km" not in df.columns and "speed_ms" in df.columns:
+            df["pace_min_km"] = (1000.0 / df["speed_ms"] / 60.0).where(
+                df["speed_ms"] > 0
+            )
+
+        # ── Validate required columns ─────────────────────────────────────
+        missing = [
+            col
+            for col, spec in DATAFRAME_SCHEMA.items()
+            if spec["required"] and col not in df.columns
+        ]
+        if missing:
+            raise ValueError(
+                f"DataFrame is missing required columns: {missing}.  "
+                f"See runtrackz.DATAFRAME_SCHEMA for the full contract."
+            )
+
+        return cls(
+            df=df,
+            session=dict(session),
+            source_file=Path(source_file) if source_file is not None else Path("external"),
+            is_smoothed=is_smoothed,
+        )
+
+    # ── Slicing ───────────────────────────────────────────────────────────
+
+    def slice_km(self, start_km: float, end_km: float) -> 'RunData':
+        """
+        Return a new :class:`RunData` containing only rows between
+        *start_km* and *end_km* of cumulative distance.
+
+        ``elapsed_s`` and ``distance_m`` are re-zeroed to the start of
+        the slice so that all analysis modules work naturally on the result.
+
+        Parameters
+        ----------
+        start_km, end_km : float
+            Distance range in kilometres, measured from the start of the
+            original run.
+
+        Returns
+        -------
+        RunData
+            A trimmed copy.  ``source_file`` and ``is_smoothed`` are
+            inherited from the parent.  The session dict is copied and
+            annotated with ``is_slice=True``, ``slice_start_km``, and
+            ``slice_end_km``.
+
+        Examples
+        --------
+        Isolate the third kilometre for analysis:
+
+        .. code-block:: python
+
+            seg = run.slice_km(2.0, 3.0)
+            hr  = runtrackz.hr_analysis.analyze(seg, config=cfg)
+        """
+        mask = (
+            (self.df["distance_m"] >= start_km * 1000.0) &
+            (self.df["distance_m"] <= end_km   * 1000.0)
+        )
+        new_df = self.df[mask].copy()
+        if not new_df.empty:
+            new_df["distance_m"] -= new_df["distance_m"].iloc[0]
+            new_df["elapsed_s"]  -= new_df["elapsed_s"].iloc[0]
+        sliced_session = {
+            **self.session,
+            "is_slice":      True,
+            "slice_start_km": start_km,
+            "slice_end_km":   end_km,
+        }
+        return RunData(
+            df=new_df,
+            session=sliced_session,
+            source_file=self.source_file,
+            is_smoothed=self.is_smoothed,
+        )
+
+    def slice_elapsed(self, start_s: float, end_s: float) -> 'RunData':
+        """
+        Return a new :class:`RunData` containing only rows between
+        *start_s* and *end_s* elapsed seconds.
+
+        ``elapsed_s`` and ``distance_m`` are re-zeroed to the start of
+        the slice so that all analysis modules work naturally on the result.
+
+        Parameters
+        ----------
+        start_s, end_s : float
+            Time range in seconds, measured from the start of the original
+            run.
+
+        Returns
+        -------
+        RunData
+            A trimmed copy.  ``source_file`` and ``is_smoothed`` are
+            inherited from the parent.  The session dict is annotated with
+            ``is_slice=True``, ``slice_start_s``, and ``slice_end_s``.
+
+        Examples
+        --------
+        Extract the second detected interval by elapsed time:
+
+        .. code-block:: python
+
+            stats = runtrackz.workout_analysis.analyze(run, hr, pace)
+            iv    = stats.intervals[1]
+            seg   = run.slice_elapsed(iv.start_s, iv.end_s)
+            hr2   = runtrackz.hr_analysis.analyze(seg, config=cfg)
+        """
+        mask = (
+            (self.df["elapsed_s"] >= start_s) &
+            (self.df["elapsed_s"] <= end_s)
+        )
+        new_df = self.df[mask].copy()
+        if not new_df.empty:
+            dist_offset  = new_df["distance_m"].iloc[0]
+            time_offset  = new_df["elapsed_s"].iloc[0]
+            new_df["distance_m"] -= dist_offset
+            new_df["elapsed_s"]  -= time_offset
+        sliced_session = {
+            **self.session,
+            "is_slice":     True,
+            "slice_start_s": start_s,
+            "slice_end_s":   end_s,
+        }
+        return RunData(
+            df=new_df,
+            session=sliced_session,
+            source_file=self.source_file,
+            is_smoothed=self.is_smoothed,
+        )
 
     @staticmethod
     def _build_df(raw_records: list[dict]) -> pd.DataFrame:
@@ -640,6 +964,7 @@ class RunData:
         custom_meta = {
             b'runtrackz_session':     json.dumps(session_out).encode(),
             b'runtrackz_source_file': str(self.source_file).encode(),
+            b'runtrackz_is_smoothed': str(self.is_smoothed).encode(),
         }
         table = table.replace_schema_metadata({**existing_meta, **custom_meta})
         pq.write_table(table, path)
@@ -673,13 +998,16 @@ class RunData:
         meta = table.schema.metadata or {}
         session: dict = {}
         source_file: Path = path  # fallback if metadata is missing
+        is_smoothed: bool = False
 
         if b'runtrackz_session' in meta:
             session = json.loads(meta[b'runtrackz_session'])
         if b'runtrackz_source_file' in meta:
             source_file = Path(meta[b'runtrackz_source_file'].decode())
+        if b'runtrackz_is_smoothed' in meta:
+            is_smoothed = meta[b'runtrackz_is_smoothed'].decode().lower() == 'true'
 
-        return cls(df=df, session=session, source_file=source_file)
+        return cls(df=df, session=session, source_file=source_file, is_smoothed=is_smoothed)
 
     def __repr__(self) -> str:
         if self.df.empty:
@@ -689,11 +1017,15 @@ class RunData:
         sport_str = self.sport
         if self.sub_sport not in ('generic', 'unknown'):
             sport_str += f'/{self.sub_sport}'
+        is_slice    = self.session.get('is_slice', False)
+        smoothed    = ', smoothed' if self.is_smoothed else ''
+        slice_note  = ', slice' if is_slice else ''
         return (
             f"RunData("
             f"sport={sport_str}, "
             f"date={self.df.index[0].date()}, "
             f"duration={duration/60:.1f}min, "
             f"distance={dist/1000:.2f}km, "
-            f"points={len(self.df)})"
+            f"points={len(self.df)}"
+            f"{smoothed}{slice_note})"
         )
