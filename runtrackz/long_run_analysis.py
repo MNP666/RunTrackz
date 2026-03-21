@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from runtrackz.parser import RunData
+    from runtrackz.models import RunData
     from runtrackz.hr_analysis import HRStats
     from runtrackz.pace_analysis import PaceStats
     from runtrackz.config import Config

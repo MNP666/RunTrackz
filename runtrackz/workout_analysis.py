@@ -40,7 +40,7 @@ import numpy as np
 import pandas as pd
 
 if TYPE_CHECKING:
-    from runtrackz.parser import RunData
+    from runtrackz.models import RunData
     from runtrackz.hr_analysis import HRStats
     from runtrackz.pace_analysis import PaceStats
     from runtrackz.config import Config

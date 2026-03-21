@@ -69,7 +69,7 @@ import numpy as np
 import pandas as pd
 
 if TYPE_CHECKING:
-    from runtrackz.parser import RunData
+    from runtrackz.models import RunData
 
 #: Default metrics to include when the caller does not specify.
 #: Columns absent from a given RunData are silently skipped.

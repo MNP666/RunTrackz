@@ -207,7 +207,7 @@ def analyze(
     Parameters
     ----------
     run : RunData
-        Parsed run from :func:`runtrackz.parser.load`.
+        Parsed run from :func:`RunData.from_dataframe`.
     hr_stats : HRStats
         Result from :func:`runtrackz.hr_analysis.analyze`.
     pace_stats : PaceStats

@@ -163,7 +163,7 @@ def analyze(
     Parameters
     ----------
     run : RunData
-        Parsed run from :func:`runtrackz.parser.load`.
+        Parsed run from :func:`RunData.from_dataframe`.
     max_hr : int, optional
         Maximum heart rate in bpm. If None, uses config.max_hr or the
         observed max from the run (in that priority order).

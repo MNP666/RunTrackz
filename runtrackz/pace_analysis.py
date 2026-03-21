@@ -162,7 +162,7 @@ def analyze(
     Parameters
     ----------
     run : RunData
-        Parsed run from :func:`runtrackz.parser.load`.
+        Parsed run from :func:`RunData.from_dataframe`.
     split_distance_m : float
         Distance per split in metres (default 1000 = per km).
     smooth_speed : bool
