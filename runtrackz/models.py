@@ -129,6 +129,13 @@ DATAFRAME_SCHEMA: dict[str, dict] = {
         "description": "Ground contact time",
         "required": False,
     },
+    "stride_length_m": {
+        "unit": "m",
+        "description": "Stride length — one full gait cycle (left + right step). "
+                       "Key indicator of running economy; used in long-run economy "
+                       "analysis alongside cadence.",
+        "required": False,
+    },
 }
 
 
